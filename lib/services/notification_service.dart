@@ -21,6 +21,7 @@ import 'dart:convert';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:overmorrow/decoders/weather_data.dart';
+import 'package:overmorrow/services/notification_image_service.dart';
 import 'package:overmorrow/services/preferences_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -42,19 +43,26 @@ class NotificationService {
   );
 
   Future<void> init() async {
-    if (PreferenceUtils.getBool("Ongoing notification", false)) {
-      const androidSettings = AndroidInitializationSettings('@drawable/weather_partly_cloudy');
-        const settings = InitializationSettings(android: androidSettings);
+    // the plugin has to be initialized every launch, regardless of whether
+    // the ongoing notification is currently turned on - otherwise show()
+    // silently fails the first time the user flips the toggle on, since
+    // initialize() would never have run in that session.
+    const androidSettings = AndroidInitializationSettings('@drawable/weather_partly_cloudy');
+    const settings = InitializationSettings(android: androidSettings);
 
-        await _plugin.initialize(
-          settings: settings,
-          onDidReceiveNotificationResponse: (NotificationResponse response) {
-          final String? payload = response.payload;
-          if (payload != null) {
-            print('Notification tapped with payload: $payload');
-          }
-        },
-      );
+    await _plugin.initialize(
+      settings: settings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        final String? payload = response.payload;
+        if (payload != null) {
+          print('Notification tapped with payload: $payload');
+        }
+      },
+    );
+
+    // if the user had it on from a previous session, re-show it on this launch too
+    if (PreferenceUtils.getBool("Ongoing notification", false)) {
+      updateOngoingNotification(PreferenceUtils.instance);
     }
   }
 
@@ -127,16 +135,11 @@ class NotificationService {
 
     print("SHOWONGOING");
 
-    // build a short "next few hours" summary from the 1-hourly forecast lists
-    // e.g. "14:00 18°  ·  15:00 17°  ·  16:00 16°"
-    List<String> hourNames = List<String>.from(jsonDecode(data.hourly1Names));
-    List<int> hourTemps = List<int>.from(jsonDecode(data.hourly1Temps));
-
-    String hourlySummary = "";
-    for (int i = 0; i < hourNames.length && i < hourTemps.length; i++) {
-      hourlySummary += "${hourNames[i]} ${hourTemps[i]}°";
-      if (i != hourNames.length - 1) hourlySummary += "   ·   ";
-    }
+    // draw the whole card (current temp, feels like, high/low, wind/humidity/uv,
+    // hourly strip) into a bitmap, since the built-in notification styles can't
+    // lay out a custom grid like this on their own.
+    final String cardImagePath =
+        await NotificationImageService.buildOngoingNotificationImage(data);
 
     AndroidNotificationDetails androidNotificationDetails = AndroidNotificationDetails(
       'weather_ongoing',
@@ -150,14 +153,13 @@ class NotificationService {
       icon: weatherIconResMap[data.currentCondition] ?? "@drawable/weather_partly_cloudy",
       channelShowBadge: false,
       // collapsed view keeps showing current temp/condition + place,
-      // expanded view additionally shows the next few hours
-      styleInformation: hourlySummary.isNotEmpty
-          ? BigTextStyleInformation(
-              hourlySummary,
-              contentTitle: '${data.currentTemp}° ${data.currentCondition}',
-              summaryText: data.place,
-            )
-          : null,
+      // expanded view shows the full custom-drawn card
+      styleInformation: BigPictureStyleInformation(
+        FilePathAndroidBitmap(cardImagePath),
+        hideExpandedLargeIcon: true,
+        contentTitle: '${data.currentTemp}° ${data.currentCondition}',
+        summaryText: data.place,
+      ),
     );
 
     Map<String, String> payloadData = {
