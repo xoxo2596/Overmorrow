@@ -763,9 +763,9 @@ Future<LightHourlyForecastData> omGetHourlyForecast(placeName, lat, lon, SharedP
   final oMParams = {
     "latitude": lat.toString(),
     "longitude": lon.toString(),
-    "current": ["temperature_2m", "weather_code"],
-    "hourly" : ["temperature_2m", "weather_code"],
-    "daily": ["sunrise", "sunset"],
+    "current": ["temperature_2m", "weather_code", "apparent_temperature", "relative_humidity_2m", "wind_speed_10m"],
+    "hourly" : ["temperature_2m", "weather_code", "precipitation_probability", "uv_index"],
+    "daily": ["sunrise", "sunset", "temperature_2m_max", "temperature_2m_min"],
     "forecast_days": "1",
     "timezone": "auto",
   };
@@ -788,9 +788,16 @@ Future<LightHourlyForecastData> omGetHourlyForecast(placeName, lat, lon, SharedP
   List<String> hourly1Conditions = [];
   List<int> hourly1Temps = [];
   List<String> hourly1Names = [];
+  List<int> hourly1PrecipProbability = [];
 
   final String tempUnit = prefs.getString("Temperature") ?? "˚C";
   final String timeMode = prefs.getString("Time mode") ?? "12 hour";
+  final String windUnit = prefs.getString("Wind") ?? "m/s";
+
+  //uv/precip aren't in the "current" endpoint on open-meteo, so grab them
+  //from the hourly list at whichever index lines up with the current hour
+  int currentUv = 0;
+  int currentPrecipProbability = 0;
 
   for (int i = 0; i < item["hourly"]["temperature_2m"].length; i++) {
     DateTime there = DateTime.parse(item["hourly"]["time"][i]);
@@ -801,10 +808,17 @@ Future<LightHourlyForecastData> omGetHourlyForecast(placeName, lat, lon, SharedP
       hourly6Names.add(formatHourByTimeMode(d, timeMode));
     }
 
-    if (d.difference(now).inHours >= 0 && d.difference(now).inHours < 3) {
+    //widened from 3 to 6 hours so the notification card has enough columns
+    if (d.difference(now).inHours >= 0 && d.difference(now).inHours < 6) {
+      if (hourly1Conditions.isEmpty) {
+        currentUv = (item["hourly"]["uv_index"][i] as num).round();
+        currentPrecipProbability = (item["hourly"]["precipitation_probability"][i] as num).round();
+      }
+
       hourly1Conditions.add(oMCurrentTextCorrection(item["hourly"]["weather_code"][i], sunStatus, there));
       hourly1Temps.add(unitConversion(item["hourly"]["temperature_2m"][i],tempUnit).round());
       hourly1Names.add(formatHourByTimeMode(d, timeMode));
+      hourly1PrecipProbability.add((item["hourly"]["precipitation_probability"][i] as num).round());
     }
   }
 
@@ -820,5 +834,14 @@ Future<LightHourlyForecastData> omGetHourlyForecast(placeName, lat, lon, SharedP
       hourly1Conditions: jsonEncode(hourly1Conditions),
       hourly1Names: jsonEncode(hourly1Names),
       hourly1Temps: jsonEncode(hourly1Temps),
+      feelsLike: unitConversion(item["current"]["apparent_temperature"], tempUnit).round(),
+      tempMax: unitConversion(item["daily"]["temperature_2m_max"][0], tempUnit).round(),
+      tempMin: unitConversion(item["daily"]["temperature_2m_min"][0], tempUnit).round(),
+      humidity: (item["current"]["relative_humidity_2m"] as num).round(),
+      uvIndex: currentUv,
+      windSpeed: unitConversion(item["current"]["wind_speed_10m"], windUnit),
+      windUnit: windUnit,
+      precipProbability: currentPrecipProbability,
+      hourly1PrecipProbability: jsonEncode(hourly1PrecipProbability),
   );
 }
