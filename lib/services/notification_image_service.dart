@@ -25,7 +25,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:vector_graphics/vector_graphics.dart' as vg;
 
 import '../decoders/weather_data.dart';
 import '../weather_refact.dart';
@@ -171,7 +170,7 @@ class NotificationImageService {
 
   static Future<ui.Image> _loadSvgAsImage(String assetPath, int size) async {
     final loader = SvgAssetLoader(assetPath);
-    final vg.PictureInfo pictureInfo = await vg.loadPicture(loader, null);
+    final PictureInfo pictureInfo = await vg.loadPicture(loader, null);
 
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(recorder);

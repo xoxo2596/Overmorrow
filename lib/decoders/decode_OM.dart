@@ -839,7 +839,7 @@ Future<LightHourlyForecastData> omGetHourlyForecast(placeName, lat, lon, SharedP
       tempMin: unitConversion(item["daily"]["temperature_2m_min"][0], tempUnit).round(),
       humidity: (item["current"]["relative_humidity_2m"] as num).round(),
       uvIndex: currentUv,
-      windSpeed: unitConversion(item["current"]["wind_speed_10m"], windUnit),
+      windSpeed: unitConversion(item["current"]["wind_speed_10m"], windUnit).toDouble(),
       windUnit: windUnit,
       precipProbability: currentPrecipProbability,
       hourly1PrecipProbability: jsonEncode(hourly1PrecipProbability),
