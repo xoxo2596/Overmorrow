@@ -112,8 +112,8 @@ class NotificationService {
     }
 
     if (location != "unknown" && latLon != "unknown") {
-      LightCurrentWeatherData data = await LightCurrentWeatherData
-          .getLightCurrentWeatherData(location, latLon, provider, prefs);
+      LightHourlyForecastData data = await LightHourlyForecastData
+          .getLightForecastData(location, latLon, provider, prefs);
 
       NotificationService().showOngoingNotification(data, location, latLon);
     }
@@ -123,9 +123,20 @@ class NotificationService {
     _plugin.cancel(id: 1);
   }
 
-  Future<void> showOngoingNotification(LightCurrentWeatherData data, String location, String latLon) async {
+  Future<void> showOngoingNotification(LightHourlyForecastData data, String location, String latLon) async {
 
     print("SHOWONGOING");
+
+    // build a short "next few hours" summary from the 1-hourly forecast lists
+    // e.g. "14:00 18°  ·  15:00 17°  ·  16:00 16°"
+    List<String> hourNames = List<String>.from(jsonDecode(data.hourly1Names));
+    List<int> hourTemps = List<int>.from(jsonDecode(data.hourly1Temps));
+
+    String hourlySummary = "";
+    for (int i = 0; i < hourNames.length && i < hourTemps.length; i++) {
+      hourlySummary += "${hourNames[i]} ${hourTemps[i]}°";
+      if (i != hourNames.length - 1) hourlySummary += "   ·   ";
+    }
 
     AndroidNotificationDetails androidNotificationDetails = AndroidNotificationDetails(
       'weather_ongoing',
@@ -136,8 +147,17 @@ class NotificationService {
       autoCancel: false,
       onlyAlertOnce: true,
       showWhen: false,
-      icon: weatherIconResMap[data.condition] ?? "@drawable/weather_partly_cloudy",
+      icon: weatherIconResMap[data.currentCondition] ?? "@drawable/weather_partly_cloudy",
       channelShowBadge: false,
+      // collapsed view keeps showing current temp/condition + place,
+      // expanded view additionally shows the next few hours
+      styleInformation: hourlySummary.isNotEmpty
+          ? BigTextStyleInformation(
+              hourlySummary,
+              contentTitle: '${data.currentTemp}° ${data.currentCondition}',
+              summaryText: data.place,
+            )
+          : null,
     );
 
     Map<String, String> payloadData = {
@@ -147,7 +167,7 @@ class NotificationService {
 
     await _plugin.show(
       id: 1,
-      title: '${data.temp}° ${data.condition}',
+      title: '${data.currentTemp}° ${data.currentCondition}',
       body: data.place,
       notificationDetails: NotificationDetails(android: androidNotificationDetails,),
       payload: jsonEncode(payloadData),
