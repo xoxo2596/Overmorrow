@@ -24,6 +24,11 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # Pin an exact, known-good version instead of always tracking
+          # "stable" — Flutter 3.47 (released Aug 2026) shipped changes
+          # that surface the AGP 9 / new-DSL issue on this project.
+          # Bump this deliberately when you're ready to test a newer Flutter.
+          flutter-version: '3.44.7'
 
       - name: Install dependencies
         run: flutter pub get
