@@ -35,7 +35,31 @@ import '../weather_refact.dart';
 /// arbitrary grid like this through the built-in styles, so the whole card
 /// is drawn once as a bitmap instead.
 class NotificationImageService {
+
+  // The app-open refresh (NotificationService.init) and the 15-min
+  // WorkManager background task can both call this around the same time,
+  // and WorkManager runs its task in a *separate isolate/engine* from the
+  // main app. Doing GPU rasterization (Canvas / Picture.toImage) from two
+  // engines at once can crash the GPU driver, and a plain Dart lock
+  // (a static field) wouldn't help since isolates don't share memory.
+  // An OS-level file lock does work across isolates, so use that to make
+  // sure only one build ever runs at a time - a second caller just waits
+  // for the file lock instead of rendering concurrently.
   static Future<String> buildOngoingNotificationImage(
+      LightHourlyForecastData data) async {
+    final Directory dir = await getTemporaryDirectory();
+    final File lockFile = File('${dir.path}/ongoing_notification.lock');
+    final RandomAccessFile raf = await lockFile.open(mode: FileMode.write);
+    await raf.lock();
+    try {
+      return await _buildOngoingNotificationImage(data);
+    } finally {
+      await raf.unlock();
+      await raf.close();
+    }
+  }
+
+  static Future<String> _buildOngoingNotificationImage(
       LightHourlyForecastData data) async {
     final bool isDark = SchedulerBinding
             .instance.platformDispatcher.platformBrightness ==
