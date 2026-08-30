@@ -357,6 +357,17 @@ class LightHourlyForecastData {
   final String hourly1Temps;
   final String hourly1Names;
 
+  //extra fields for the rich ongoing notification card
+  final int feelsLike;
+  final int tempMax;
+  final int tempMin;
+  final int humidity;
+  final int uvIndex;
+  final double windSpeed;
+  final String windUnit;
+  final int precipProbability;
+  final String hourly1PrecipProbability; //json-encoded List<int>, aligned with hourly1*
+
   LightHourlyForecastData({
     required this.place,
     required this.currentCondition,
@@ -367,7 +378,16 @@ class LightHourlyForecastData {
     required this.hourly6Temps,
     required this.hourly1Conditions,
     required this.hourly1Names,
-    required this.hourly1Temps
+    required this.hourly1Temps,
+    this.feelsLike = 0,
+    this.tempMax = 0,
+    this.tempMin = 0,
+    this.humidity = 0,
+    this.uvIndex = 0,
+    this.windSpeed = 0,
+    this.windUnit = "km/h",
+    this.precipProbability = 0,
+    this.hourly1PrecipProbability = "[]",
   });
 
   static Future<LightHourlyForecastData> getLightForecastData(placeName, latLon, provider, SharedPreferences prefs) async {
