@@ -64,6 +64,82 @@ DateTime metNUtcToLocationTime(String timestamp, Duration utcOffset) {
   );
 }
 
+
+String metNHourKey(DateTime time) {
+  return '${time.year.toString().padLeft(4, '0')}-'
+      '${time.month.toString().padLeft(2, '0')}-'
+      '${time.day.toString().padLeft(2, '0')}T'
+      '${time.hour.toString().padLeft(2, '0')}:00';
+}
+
+/// MET Norway does not expose precipitation probability for every region.
+/// When it is missing, use Open-Meteo only for that one field.
+///
+/// MET data remains the primary source. If this fallback request fails,
+/// an empty map is returned and MET Norway continues to work normally.
+Future<Map<String, int>> metNGetOpenMeteoPrecipProbabilities(
+  lat,
+  lng, {
+  int forecastDays = 10,
+}) async {
+  try {
+    final params = {
+      'latitude': lat.toString(),
+      'longitude': lng.toString(),
+      'hourly': 'precipitation_probability',
+      'forecast_days': forecastDays.toString(),
+      'timezone': 'auto',
+    };
+
+    final url = Uri.https('api.open-meteo.com', 'v1/forecast', params);
+    final http.Response response = await http.get(
+      url,
+      headers: {
+        'User-Agent': 'Overmorrow weather (com.marotidev.overmorrow)',
+      },
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return <String, int>{};
+    }
+
+    final dynamic body = jsonDecode(response.body);
+    final dynamic hourly = body['hourly'];
+    if (hourly == null) {
+      return <String, int>{};
+    }
+
+    final dynamic rawTimes = hourly['time'];
+    final dynamic rawProbabilities = hourly['precipitation_probability'];
+    if (rawTimes is! List || rawProbabilities is! List) {
+      return <String, int>{};
+    }
+
+    final List<dynamic> times = rawTimes;
+    final List<dynamic> probabilities = rawProbabilities;
+    final Map<String, int> result = {};
+    final int count = min(times.length, probabilities.length);
+
+    for (int i = 0; i < count; i++) {
+      final dynamic value = probabilities[i];
+      if (value is! num) {
+        continue;
+      }
+
+      final DateTime localHour = DateTime.parse(times[i].toString());
+      result[metNHourKey(localHour)] =
+          value.round().clamp(0, 100).toInt();
+    }
+
+    return result;
+  } catch (_) {
+    // This is a fallback only. Never make MET Norway fail just because
+    // Open-Meteo's probability lookup is temporarily unavailable.
+    return <String, int>{};
+  }
+}
+
+
 double metNcalculateFeelsLike(double t, double r, double v) {
   //unfortunately met norway has no feels like temperatures, so i have to calculate it myself based on:
   //temperature, relative humidity, and wind speed
@@ -197,7 +273,14 @@ WeatherCurrent metNWeatherCurrentFromJson(item) {
   );
 }
 
-WeatherDay metNWeatherDayFromJson(item, start, end, index, Duration utcOffset) {
+WeatherDay metNWeatherDayFromJson(
+  item,
+  start,
+  end,
+  index,
+  Duration utcOffset,
+  Map<String, int> openMeteoPrecipProbabilities,
+) {
   List<double> rawTemps = [];
   List<double> windspeeds = [];
   List<int?> winddirs = [];
@@ -215,7 +298,10 @@ WeatherDay metNWeatherDayFromJson(item, start, end, index, Duration utcOffset) {
 
   for (int n = start; n < end; n++) {
     WeatherHour hour = metNWeatherHourFromJson(
-        item["properties"]["timeseries"][n], utcOffset);
+      item["properties"]["timeseries"][n],
+      utcOffset,
+      openMeteoPrecipProbabilities,
+    );
     rawTemps.add(hour.tempC);
     windspeeds.add(hour.windKmh);
     winddirs.add(hour.windDirA);
@@ -226,8 +312,9 @@ WeatherDay metNWeatherDayFromJson(item, start, end, index, Duration utcOffset) {
     int value = weatherConditionBiassTable[hour.condition] ?? 0;
     oneSummary[index] += value;
 
-    if ((hour.precipProb ?? 0) > (precipProb ?? 0)) {
-      precipProb = hour.precipProb?.toInt();
+    if (hour.precipProb != null &&
+        (precipProb == null || hour.precipProb! > precipProb)) {
+      precipProb = hour.precipProb;
     }
     if ((hour.uv ?? 0) > (uv ?? 0)) {
       uv = hour.uv?.toInt();
@@ -258,11 +345,27 @@ WeatherDay metNWeatherDayFromJson(item, start, end, index, Duration utcOffset) {
   );
 }
 
-WeatherHour metNWeatherHourFromJson(item, Duration utcOffset) {
+WeatherHour metNWeatherHourFromJson(
+  item,
+  Duration utcOffset,
+  Map<String, int> openMeteoPrecipProbabilities,
+) {
   final dynamic nextHours = item["data"]["next_1_hours"] ??
       item["data"]["next_6_hours"] ??
       item["data"]["next_12_hours"];
   final dynamic details = item["data"]["instant"]["details"];
+  final DateTime localTime =
+      metNUtcToLocationTime(item["time"], utcOffset);
+
+  // Prefer MET Norway's own probability whenever it is available.
+  // Outside regions where MET supplies this field, fall back to the
+  // Open-Meteo probability for the exact same local forecast hour.
+  final int? metPrecipProbability =
+      (nextHours?["details"]?["probability_of_precipitation"] as num?)
+          ?.round();
+  final int? precipProbability =
+      metPrecipProbability ??
+      openMeteoPrecipProbabilities[metNHourKey(localTime)];
 
   // Some hours near the end of the forecast window have no next_* summary
   // at all — don't crash, just report a neutral condition for that hour.
@@ -272,10 +375,14 @@ WeatherHour metNWeatherHourFromJson(item, Duration utcOffset) {
         ? metNTextCorrection(nextHours["summary"]["symbol_code"])
         : metNTextCorrection('clearsky_day'),
     tempC: (details["air_temperature"] as num).toDouble(),
-    precipMm: (nextHours?["details"]?["precipitation_amount"] as num?)?.toDouble() ?? 0,
-    precipProb: (nextHours?["details"]?["probability_of_precipitation"] as num?)?.round(),
-    time: metNUtcToLocationTime(item["time"], utcOffset),
-    windKmh: ((details["wind_speed"] as num?)?.toDouble() ?? 0) * 3.6,
+    precipMm:
+        (nextHours?["details"]?["precipitation_amount"] as num?)
+                ?.toDouble() ??
+            0,
+    precipProb: precipProbability,
+    time: localTime,
+    windKmh:
+        ((details["wind_speed"] as num?)?.toDouble() ?? 0) * 3.6,
     windDirA: (details["wind_from_direction"] as num?)?.round(),
     uv: (details["ultraviolet_index_clear_sky"] as num?)?.round(),
   );
@@ -407,6 +514,11 @@ Future<WeatherData> MetNGetWeatherData(lat, lng, placeName) async {
   final DateTime fetch_datetime = Mn[1];
   final bool isonline = Mn[2];
 
+  // MET Norway is still the primary provider. This map is used only when
+  // MET omits probability_of_precipitation for a forecast hour.
+  final Map<String, int> openMeteoPrecipProbabilities =
+      await metNGetOpenMeteoPrecipProbabilities(lat, lng);
+
   // timezoneInfo.localTime is already the current wall-clock time at the
   // forecast location. Do not add the cache age to it again. Instead, remove
   // forecast entries whose actual timestamps are before the current hour.
@@ -451,7 +563,14 @@ Future<WeatherData> MetNGetWeatherData(lat, lng, placeName) async {
 
     if (n > 0 && crossedDateBoundary) {
       WeatherDay day =
-          metNWeatherDayFromJson(MnBody, begin, n, index, utcOffset);
+          metNWeatherDayFromJson(
+        MnBody,
+        begin,
+        n,
+        index,
+        utcOffset,
+        openMeteoPrecipProbabilities,
+      );
       days.add(day);
 
       if (hourly72.length < 72) {
@@ -478,6 +597,7 @@ Future<WeatherData> MetNGetWeatherData(lat, lng, placeName) async {
       MnBody["properties"]["timeseries"].length,
       index,
       utcOffset,
+      openMeteoPrecipProbabilities,
     );
     days.add(finalDay);
     if (hourly72.length < 72) {
@@ -584,6 +704,12 @@ Future<LightHourlyForecastData> metNGetLightHourlyData(placeName, lat, lon, Shar
   final MetNTimezoneInfo timezoneInfo = await MetNGetTimezoneInfo(lat, lon);
   final Duration utcOffset = timezoneInfo.utcOffset;
   final DateTime localNow = timezoneInfo.localTime;
+  final Map<String, int> openMeteoPrecipProbabilities =
+      await metNGetOpenMeteoPrecipProbabilities(
+    lat,
+    lon,
+    forecastDays: 2,
+  );
 
   final List<String> hourly6Conditions = [];
   final List<int> hourly6Temps = [];
@@ -637,7 +763,11 @@ Future<LightHourlyForecastData> metNGetLightHourlyData(placeName, lat, lon, Shar
     }
 
     if (!d.isBefore(currentHour) && d.isBefore(forecastEnd)) {
-      final int precip = (next["details"]["probability_of_precipitation"] as num?)?.round() ?? 0;
+      final int precip =
+          (next["details"]["probability_of_precipitation"] as num?)
+                  ?.round() ??
+              openMeteoPrecipProbabilities[metNHourKey(d)] ??
+              0;
       if (hourly1Conditions.isEmpty) {
         currentPrecipProbability = precip;
         currentUv = (details["ultraviolet_index_clear_sky"] as num?)?.round() ?? 0;
