@@ -69,13 +69,13 @@ class NotificationImageService {
   static Future<String> _buildOngoingNotificationImage(
       LightHourlyForecastData data) async {
     final bool isDark = SchedulerBinding
-            .instance.platformDispatcher.platformBrightness ==
-        Brightness.dark;
+        .instance.platformDispatcher.platformBrightness ==
+    Brightness.dark;
 
-    final Color textColor = isDark ? Colors.white : const Color(0xFF1B1B1B);
-    final Color subTextColor =
-        isDark ? Colors.white70 : const Color(0xFF5F6368);
-    final Color dividerColor = isDark ? Colors.white24 : Colors.black12;
+    // Force notification text to be bright white instead of grey.
+    final Color textColor = Colors.white;
+    final Color subTextColor = Colors.white;
+    final Color dividerColor = Colors.white24;
 
     const double scale = 2.5; // render at higher density for a crisp bitmap
     const double width = 340 * scale;
