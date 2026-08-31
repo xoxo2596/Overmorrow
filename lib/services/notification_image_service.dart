@@ -47,16 +47,7 @@ class NotificationImageService {
   // for the file lock instead of rendering concurrently.
   static Future<String> buildOngoingNotificationImage(
       LightHourlyForecastData data) async {
-    final Directory dir = await getTemporaryDirectory();
-    final File lockFile = File('${dir.path}/ongoing_notification.lock');
-    final RandomAccessFile raf = await lockFile.open(mode: FileMode.write);
-    await raf.lock();
-    try {
-      return await _buildOngoingNotificationImage(data);
-    } finally {
-      await raf.unlock();
-      await raf.close();
-    }
+    return _buildOngoingNotificationImage(data);
   }
 
   static Future<String> _buildOngoingNotificationImage(
