@@ -42,12 +42,11 @@ class NotificationService {
     //icon: "@drawable/icon_info"
   );
 
-  Future<void> init() async {
-    // the plugin has to be initialized every launch, regardless of whether
-    // the ongoing notification is currently turned on - otherwise show()
-    // silently fails the first time the user flips the toggle on, since
-    // initialize() would never have run in that session.
-    const androidSettings = AndroidInitializationSettings('@drawable/weather_partly_cloudy');
+  Future<void> initializePlugin() async {
+    // WorkManager runs in a separate Flutter engine, so initialization must
+    // be callable independently from the foreground-only startup behavior.
+    const androidSettings =
+        AndroidInitializationSettings('@drawable/weather_partly_cloudy');
     const settings = InitializationSettings(android: androidSettings);
 
     await _plugin.initialize(
@@ -59,10 +58,14 @@ class NotificationService {
         }
       },
     );
+  }
 
-    // if the user had it on from a previous session, re-show it on this launch too
+  Future<void> init() async {
+    await initializePlugin();
+
+    // If the user had it on from a previous session, re-show it on launch.
     if (PreferenceUtils.getBool("Ongoing notification", false)) {
-      updateOngoingNotification(PreferenceUtils.instance);
+      await updateOngoingNotification(PreferenceUtils.instance);
     }
   }
 
@@ -72,7 +75,7 @@ class NotificationService {
       if (to == true) {
         bool? permissionGranted = await androidFlutterLocalNotificationsPlugin.areNotificationsEnabled();
         if (permissionGranted == true) {
-          updateOngoingNotification(PreferenceUtils.instance);
+          await updateOngoingNotification(PreferenceUtils.instance);
           return true;
         }
         else {
@@ -80,13 +83,13 @@ class NotificationService {
 
           permissionGranted = await androidFlutterLocalNotificationsPlugin.areNotificationsEnabled();
           if (permissionGranted == true) {
-            updateOngoingNotification(PreferenceUtils.instance);
+            await updateOngoingNotification(PreferenceUtils.instance);
             return true;
           }
           return false;
         }
       } else {
-        killOngoingNotification();
+        await killOngoingNotification();
         return false;
       }
     }
@@ -123,12 +126,12 @@ class NotificationService {
       LightHourlyForecastData data = await LightHourlyForecastData
           .getLightForecastData(location, latLon, provider, prefs);
 
-      NotificationService().showOngoingNotification(data, location, latLon);
+      await showOngoingNotification(data, location, latLon);
     }
   }
 
-  void killOngoingNotification() {
-    _plugin.cancel(id: 1);
+  Future<void> killOngoingNotification() async {
+    await _plugin.cancel(id: 1);
   }
 
   Future<void> showOngoingNotification(LightHourlyForecastData data, String location, String latLon) async {
