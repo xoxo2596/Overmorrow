@@ -894,8 +894,13 @@ Future<LightHourlyForecastData> omGetHourlyForecast(
       "precipitation_probability",
       "uv_index"
     ],
-    "daily": ["sunrise", "sunset", "temperature_2m_max", "temperature_2m_min"],
-    "forecast_days": "1",
+       "daily": ["sunrise", "sunset", "temperature_2m_max", "temperature_2m_min"],
+    // 2 days, not 1: the 6-hour rolling window below (currentHour..+6h) needs
+    // to be able to reach into tomorrow's early hours once it's late in the
+    // day - with only 1 day requested, once the current hour is 23:00 there's
+    // no "tomorrow" data to pull from, so the hourly strip gets stuck
+    // showing just that single hour until the next day's fetch happens.
+    "forecast_days": "2",
     "timezone": "auto",
   };
 
@@ -937,12 +942,18 @@ Future<LightHourlyForecastData> omGetHourlyForecast(
     localtime.day,
     localtime.hour,
   );
-  final forecastEnd = currentHour.add(const Duration(hours: 6));
+    final forecastEnd = currentHour.add(const Duration(hours: 6));
+  // now that 2 days are being fetched (see forecast_days above), keep the
+  // 6-hourly forecast scoped to just today, same as before - only the
+  // 1-hourly window below is meant to reach into tomorrow.
+  final DateTime todayEnd =
+      DateTime(localtime.year, localtime.month, localtime.day)
+          .add(const Duration(days: 1));
 
   for (int i = 0; i < item["hourly"]["temperature_2m"].length; i++) {
     final DateTime there = DateTime.parse(item["hourly"]["time"][i]);
 
-    if (there.hour % 6 == 0) {
+    if (there.hour % 6 == 0 && there.isBefore(todayEnd)) {
       hourly6Conditions.add(
         oMCurrentTextCorrection(
           item["hourly"]["weather_code"][i],
