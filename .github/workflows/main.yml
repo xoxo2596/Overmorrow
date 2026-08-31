@@ -33,19 +33,31 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Create placeholder API keys file
-        # lib/api_key.dart is intentionally gitignored (real keys shouldn't be
-        # committed). The code references wapi_Key (capitalized, note this
-        # doesn't match the lowercase name in api_key_example.dart), access_key,
-        # and timezonedbKey. Dummy values are fine for a build check — the app
-        # only needs a real weatherapi.com key if you actually select that
-        # provider at runtime.
+      - name: Create API keys file
+        env:
+          WEATHERAPI_KEY: ${{ secrets.WEATHERAPI_KEY }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
         run: |
-          cat > lib/api_key.dart << 'EOF'
-          const String wapi_Key = "placeholder";
-          const String access_key = "placeholder";
-          const String timezonedbKey = "placeholder";
-          EOF
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          weatherapi_key = os.environ.get("WEATHERAPI_KEY", "").strip()
+          unsplash_key = os.environ.get("UNSPLASH_ACCESS_KEY", "").strip()
+
+          if not weatherapi_key:
+              raise SystemExit(
+                  "Missing GitHub Actions secret WEATHERAPI_KEY. "
+                  "A placeholder key builds successfully but makes WeatherAPI fail at runtime."
+              )
+
+          Path("lib/api_key.dart").write_text(
+              f"const String wapi_Key = {json.dumps(weatherapi_key)};\n"
+              f"const String access_key = {json.dumps(unsplash_key)};\n"
+              'const String timezonedbKey = "";\n'
+          )
+          PY
 
       - name: Build debug APK
         run: flutter build apk --debug
