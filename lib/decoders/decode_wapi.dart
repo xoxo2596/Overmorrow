@@ -68,29 +68,37 @@ int wapiGetWindDir(var data) {
 
 
 double getSunStatus(String sunrise, String sunset, DateTime localtime, {by = " "}) {
-  List<String> splited1 = sunrise.split(by);
-  List<String> num1 = splited1[0].split(":");
-  int hour1 = int.parse(num1[0]);
-  int minute1 = int.parse(num1[1]);
-  if (splited1[1] == 'PM') {
-    hour1 += 12;
+  int to24Hour(String value) {
+    final List<String> parts = value.trim().split(by);
+    final List<String> timeParts = parts[0].split(":");
+    int hour = int.parse(timeParts[0]);
+    final String period = parts.length > 1 ? parts[1].toUpperCase() : '';
+
+    // 12 AM is 00:xx and 12 PM is 12:xx.
+    if (period == 'AM' && hour == 12) {
+      hour = 0;
+    } else if (period == 'PM' && hour != 12) {
+      hour += 12;
+    }
+    return hour;
   }
-  int all1 = hour1 * 60 + minute1;
 
-  List<String> splited2 = sunset.split(" ");
-  List<String> num2 = splited2[0].split(":");
-  int hour2 = int.parse(num2[0]);
-  int minute2 = int.parse(num2[1]);
-  if (splited2[1] == 'PM') {
-    hour2 += 12;
+  final List<String> sunriseParts = sunrise.trim().split(by);
+  final List<String> sunsetParts = sunset.trim().split(by);
+  final int sunriseMinutes =
+      to24Hour(sunrise) * 60 + int.parse(sunriseParts[0].split(":")[1]);
+  final int sunsetMinutes =
+      to24Hour(sunset) * 60 + int.parse(sunsetParts[0].split(":")[1]);
+
+  final int daylightMinutes = sunsetMinutes - sunriseMinutes;
+  if (daylightMinutes <= 0) {
+    return 0.0;
   }
-  int all2 = (hour2 * 60 + minute2) - all1;
 
-  int hour3 = localtime.hour;
-  int minute3 = localtime.minute;
-  int all3 = (hour3 * 60 + minute3) - all1;
+  final int nowMinutes = localtime.hour * 60 + localtime.minute;
+  final int minutesSinceSunrise = nowMinutes - sunriseMinutes;
 
-  return min(1, max(all3 / all2, 0));
+  return min(1.0, max(minutesSinceSunrise / daylightMinutes, 0.0));
 }
 
 String wapiTextCorrection(name, isday) {
@@ -271,6 +279,9 @@ WeatherRain15Minutes wapiWeatherRain15MinutesFromJson(item, day, hour) {
     }
     else {
       day += 1;
+      // Hour 24 belongs to the next forecast day. Without resetting this,
+      // the six-hour rain preview can never cross midnight.
+      hour = 0;
     }
   }
 
@@ -411,9 +422,14 @@ Future<dynamic> wapiGetCurrentResponse(lat, lon) async {
   };
   final url = Uri.https('api.weatherapi.com', 'v1/current.json', params);
 
-  final response = (await http.get(url)).body;
+  final http.Response response = await http.get(url);
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw HttpException(
+      'WeatherAPI current request failed: ${response.statusCode}',
+    );
+  }
 
-  return jsonDecode(response);
+  return jsonDecode(response.body);
 }
 
 Future<LightCurrentWeatherData> wapiGetLightCurrentData(placeName, lat, lon, SharedPreferences prefs) async {
