@@ -282,11 +282,13 @@ WeatherHour metNWeatherHourFromJson(item, Duration utcOffset) {
 }
 
 Future<WeatherSunStatus> metNGetWeatherSunStatus(
-    item, lat, lng, Duration utcOffset, DateTime timeThere, DateTime fetchDate) async {
+    lat, lng, Duration utcOffset, DateTime timeThere) async {
   final MnParams = {
     "lat" : lat.toString(),
     "lon" : lng.toString(),
-    "date" : "${fetchDate.year}-${fetchDate.month.toString().padLeft(2, "0")}-${fetchDate.day.toString().padLeft(2, "0")}",
+    // Use the forecast location's current date. The cache file's modified date
+    // may be stale and may also be in the phone's timezone.
+    "date" : "${timeThere.year}-${timeThere.month.toString().padLeft(2, "0")}-${timeThere.day.toString().padLeft(2, "0")}",
   };
   final headers = {
     "User-Agent": "Overmorrow weather (com.marotidev.overmorrow)"
@@ -321,8 +323,11 @@ WeatherRain15Minutes metNWeatherRain15MinutesFromJson(item) {
   List<double> precips = [];
   List<double> hourly = [];
 
-  for (int i = 0; i < 6; i++) {
-    final dynamic data = item["properties"]["timeseries"][i]["data"];
+  final List<dynamic> timeseries = item["properties"]["timeseries"];
+  final int count = min(6, timeseries.length);
+
+  for (int i = 0; i < count; i++) {
+    final dynamic data = timeseries[i]["data"];
     final dynamic nextHours =
         data["next_1_hours"] ??
         data["next_6_hours"] ??
@@ -397,29 +402,37 @@ Future<WeatherData> MetNGetWeatherData(lat, lng, placeName) async {
   var MnBody = Mn[0];
 
   final MetNTimezoneInfo timezoneInfo = await MetNGetTimezoneInfo(lat, lng);
-  DateTime lastKnowTime = timezoneInfo.localTime;
+  final DateTime localTime = timezoneInfo.localTime;
   final Duration utcOffset = timezoneInfo.utcOffset;
-  DateTime fetch_datetime = Mn[1];
+  final DateTime fetch_datetime = Mn[1];
+  final bool isonline = Mn[2];
 
-  //this gives us the time passed since last fetch, this is all basically for offline mode
-  Duration realTimeOffset = DateTime.now().difference(fetch_datetime);
+  // timezoneInfo.localTime is already the current wall-clock time at the
+  // forecast location. Do not add the cache age to it again. Instead, remove
+  // forecast entries whose actual timestamps are before the current hour.
+  final DateTime currentHour = DateTime(
+    localTime.year,
+    localTime.month,
+    localTime.day,
+    localTime.hour,
+  );
 
-  //now we just need to apply this time offset to get the real current time
-  DateTime localTime = lastKnowTime.add(realTimeOffset);
+  final List<dynamic> timeseries = MnBody["properties"]["timeseries"];
+  int start = 0;
+  while (start < timeseries.length) {
+    final DateTime forecastHour =
+        metNUtcToLocationTime(timeseries[start]["time"], utcOffset);
+    if (!forecastHour.isBefore(currentHour)) {
+      break;
+    }
+    start += 1;
+  }
 
-  bool isonline = Mn[2];
-
-  //removes the outdated hours
-  int start = localTime.difference(DateTime(lastKnowTime.year, lastKnowTime.month,
-      lastKnowTime.day, lastKnowTime.hour)).inHours;
-
-  //make sure that there is data left
-  if (start >= MnBody["properties"]["timeseries"].length) {
+  if (start >= timeseries.length) {
     throw const SocketException("Cached data expired");
   }
 
-  //remove outdated hours
-  MnBody["properties"]["timeseries"] = MnBody["properties"]["timeseries"].sublist(start);
+  MnBody["properties"]["timeseries"] = timeseries.sublist(start);
 
   List<WeatherDay> days = [];
   List<WeatherHour> hourly72 = [];
@@ -486,7 +499,7 @@ Future<WeatherData> MetNGetWeatherData(lat, lng, placeName) async {
     radar: await RainviewerRadar.getData(),
     aqi: await oMGetWeatherAqi(lat, lng),
     sunStatus: await metNGetWeatherSunStatus(
-        MnBody, lat, lng, utcOffset, localTime, fetch_datetime),
+        lat, lng, utcOffset, localTime),
     alerts: [],
     minutely15Precip: metNWeatherRain15MinutesFromJson(MnBody),
 
@@ -516,9 +529,14 @@ Future<dynamic> metNGetLightResponse(lat, lon, {bool isCompact = true}) async {
   };
   final url = Uri.https("api.met.no", 'weatherapi/locationforecast/2.0/${isCompact ? "compact" : "complete"}', params);
 
-  final response = (await http.get(url, headers: headers)).body;
+  final http.Response response = await http.get(url, headers: headers);
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw HttpException(
+      'MET Norway request failed: ${response.statusCode}',
+    );
+  }
 
-  return jsonDecode(response);
+  return jsonDecode(response.body);
 }
 
 Future<LightCurrentWeatherData> metNGetLightCurrentData(placeName, lat, lon, SharedPreferences prefs) async {
