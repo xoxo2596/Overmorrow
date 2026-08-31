@@ -16,7 +16,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 */
 
-
 import 'dart:convert';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -28,18 +27,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../weather_refact.dart';
 
 class NotificationService {
-  static final NotificationService _instance = NotificationService._internal();
+  static final NotificationService _instance =
+      NotificationService._internal();
+
   factory NotificationService() => _instance;
+
   NotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _plugin =
+      FlutterLocalNotificationsPlugin();
 
   static const androidDetails = AndroidNotificationDetails(
     'basic_channel',
     'Alerts',
     importance: Importance.max,
     priority: Priority.high,
-    //icon: "@drawable/icon_info"
   );
 
   Future<void> initializePlugin() async {
@@ -47,12 +49,18 @@ class NotificationService {
     // be callable independently from the foreground-only startup behavior.
     const androidSettings =
         AndroidInitializationSettings('@drawable/weather_partly_cloudy');
-    const settings = InitializationSettings(android: androidSettings);
+
+    const settings = InitializationSettings(
+      android: androidSettings,
+    );
 
     await _plugin.initialize(
       settings: settings,
-      onDidReceiveNotificationResponse: (NotificationResponse response) {
+      onDidReceiveNotificationResponse: (
+        NotificationResponse response,
+      ) {
         final String? payload = response.payload;
+
         if (payload != null) {
           print('Notification tapped with payload: $payload');
         }
@@ -61,48 +69,97 @@ class NotificationService {
   }
 
   Future<void> init() async {
-    await initializePlugin();
+    try {
+      await initializePlugin();
 
-    // If the user had it on from a previous session, re-show it on launch.
-    if (PreferenceUtils.getBool("Ongoing notification", false)) {
-      await updateOngoingNotification(PreferenceUtils.instance);
+      // The ongoing notification is optional.
+      //
+      // A network/provider failure must NEVER stop the main app from
+      // reaching runApp().
+      if (PreferenceUtils.getBool("Ongoing notification", false)) {
+        await updateOngoingNotification(
+          PreferenceUtils.instance,
+        );
+      }
+    } catch (error, stackTrace) {
+      print(
+        'Notification initialization/refresh failed: $error',
+      );
+      print(stackTrace);
     }
   }
 
   Future<bool> handleNotificationToggle(bool to) async {
-    AndroidFlutterLocalNotificationsPlugin? androidFlutterLocalNotificationsPlugin = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-    if (androidFlutterLocalNotificationsPlugin != null) {
-      if (to == true) {
-        bool? permissionGranted = await androidFlutterLocalNotificationsPlugin.areNotificationsEnabled();
-        if (permissionGranted == true) {
-          await updateOngoingNotification(PreferenceUtils.instance);
-          return true;
-        }
-        else {
-          await androidFlutterLocalNotificationsPlugin.requestNotificationsPermission();
+    final AndroidFlutterLocalNotificationsPlugin?
+        androidFlutterLocalNotificationsPlugin =
+        _plugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
 
-          permissionGranted = await androidFlutterLocalNotificationsPlugin.areNotificationsEnabled();
-          if (permissionGranted == true) {
-            await updateOngoingNotification(PreferenceUtils.instance);
-            return true;
-          }
+    if (androidFlutterLocalNotificationsPlugin == null) {
+      return false;
+    }
+
+    if (to == true) {
+      bool? permissionGranted =
+          await androidFlutterLocalNotificationsPlugin
+              .areNotificationsEnabled();
+
+      if (permissionGranted == true) {
+        try {
+          await updateOngoingNotification(
+            PreferenceUtils.instance,
+          );
+          return true;
+        } catch (error, stackTrace) {
+          print(
+            'Failed to enable ongoing notification: $error',
+          );
+          print(stackTrace);
           return false;
         }
-      } else {
-        await killOngoingNotification();
-        return false;
       }
+
+      await androidFlutterLocalNotificationsPlugin
+          .requestNotificationsPermission();
+
+      permissionGranted =
+          await androidFlutterLocalNotificationsPlugin
+              .areNotificationsEnabled();
+
+      if (permissionGranted == true) {
+        try {
+          await updateOngoingNotification(
+            PreferenceUtils.instance,
+          );
+          return true;
+        } catch (error, stackTrace) {
+          print(
+            'Failed to enable ongoing notification: $error',
+          );
+          print(stackTrace);
+          return false;
+        }
+      }
+
+      return false;
     }
+
+    await killOngoingNotification();
     return false;
   }
 
-  Future<NotificationAppLaunchDetails?> getNotificationLaunchDetails() async {
-    final NotificationAppLaunchDetails? launchDetails = await _plugin.getNotificationAppLaunchDetails();
+  Future<NotificationAppLaunchDetails?>
+      getNotificationLaunchDetails() async {
+    final NotificationAppLaunchDetails? launchDetails =
+        await _plugin.getNotificationAppLaunchDetails();
+
     return launchDetails;
   }
 
   Future<void> showSimpleNotification() async {
-    const details = NotificationDetails(android: androidDetails);
+    const details = NotificationDetails(
+      android: androidDetails,
+    );
 
     await _plugin.show(
       id: 0,
@@ -112,71 +169,138 @@ class NotificationService {
     );
   }
 
-  Future<void> updateOngoingNotification(SharedPreferences prefs) async {
-    String location = prefs.getString("Ongoing place") ?? "unknown";
-    String latLon = prefs.getString("Ongoing latLon") ?? "unknown";
-    String provider = prefs.getString("Ongoing provider") ?? "open-meteo";
+  Future<void> updateOngoingNotification(
+    SharedPreferences prefs,
+  ) async {
+    String location =
+        prefs.getString("Ongoing place") ?? "unknown";
+
+    String latLon =
+        prefs.getString("Ongoing latLon") ?? "unknown";
+
+    final String provider =
+        prefs.getString("Ongoing provider") ?? "open-meteo";
 
     if (location == "Current Location") {
-      location = prefs.getString('LastKnownPositionName') ?? 'unknown';
-      latLon = prefs.getString('LastKnownPositionCord') ?? 'unknown';
+      location =
+          prefs.getString('LastKnownPositionName') ??
+              'unknown';
+
+      latLon =
+          prefs.getString('LastKnownPositionCord') ??
+              'unknown';
     }
 
-    if (location != "unknown" && latLon != "unknown") {
-      LightHourlyForecastData data = await LightHourlyForecastData
-          .getLightForecastData(location, latLon, provider, prefs);
+    if (location == "unknown" || latLon == "unknown") {
+      print(
+        'Skipping ongoing notification refresh: '
+        'location data is unavailable.',
+      );
 
-      await showOngoingNotification(data, location, latLon);
+      return;
+    }
+
+    try {
+      final LightHourlyForecastData data =
+          await LightHourlyForecastData.getLightForecastData(
+        location,
+        latLon,
+        provider,
+        prefs,
+      );
+
+      await showOngoingNotification(
+        data,
+        location,
+        latLon,
+      );
+    } catch (error, stackTrace) {
+      // Do not let a failed provider request crash the foreground app
+      // or the WorkManager Flutter engine.
+      print(
+        'Ongoing notification refresh failed '
+        'for provider "$provider": $error',
+      );
+      print(stackTrace);
+
+      rethrow;
     }
   }
 
   Future<void> killOngoingNotification() async {
-    await _plugin.cancel(id: 1);
+    await _plugin.cancel(
+      id: 1,
+    );
   }
 
-  Future<void> showOngoingNotification(LightHourlyForecastData data, String location, String latLon) async {
-
+  Future<void> showOngoingNotification(
+    LightHourlyForecastData data,
+    String location,
+    String latLon,
+  ) async {
     print("SHOWONGOING");
 
-    // draw the whole card (current temp, feels like, high/low, wind/humidity/uv,
-    // hourly strip) into a bitmap, since the built-in notification styles can't
-    // lay out a custom grid like this on their own.
+    // Draw the whole card into a bitmap.
     final String cardImagePath =
-        await NotificationImageService.buildOngoingNotificationImage(data);
+        await NotificationImageService
+            .buildOngoingNotificationImage(
+      data,
+    );
 
-    AndroidNotificationDetails androidNotificationDetails = AndroidNotificationDetails(
+    final AndroidNotificationDetails
+        androidNotificationDetails =
+        AndroidNotificationDetails(
       'weather_ongoing',
       'Ongoing Weather',
       importance: Importance.low,
       priority: Priority.low,
+
+      // The same ID is always used, so:
+      //
+      // notification already visible -> updated
+      // notification dismissed       -> recreated
       ongoing: true,
       autoCancel: false,
       onlyAlertOnce: true,
       showWhen: false,
-      icon: weatherIconResMap[data.currentCondition] ?? "@drawable/weather_partly_cloudy",
+
+      icon:
+          weatherIconResMap[data.currentCondition] ??
+              "@drawable/weather_partly_cloudy",
+
       channelShowBadge: false,
-      // collapsed view keeps showing current temp/condition + place,
-      // expanded view shows the full custom-drawn card
-      styleInformation: BigPictureStyleInformation(
-        FilePathAndroidBitmap(cardImagePath),
+
+      styleInformation:
+          BigPictureStyleInformation(
+        FilePathAndroidBitmap(
+          cardImagePath,
+        ),
         hideExpandedLargeIcon: true,
-        contentTitle: '${data.currentTemp}° ${data.currentCondition}',
+        contentTitle:
+            '${data.currentTemp}° '
+            '${data.currentCondition}',
         summaryText: data.place,
       ),
     );
 
-    Map<String, String> payloadData = {
+    final Map<String, String> payloadData = {
       'location': location,
-      'latLon' : latLon
+      'latLon': latLon,
     };
 
     await _plugin.show(
       id: 1,
-      title: '${data.currentTemp}° ${data.currentCondition}',
+      title:
+          '${data.currentTemp}° '
+          '${data.currentCondition}',
       body: data.place,
-      notificationDetails: NotificationDetails(android: androidNotificationDetails,),
-      payload: jsonEncode(payloadData),
+      notificationDetails:
+          NotificationDetails(
+        android: androidNotificationDetails,
+      ),
+      payload: jsonEncode(
+        payloadData,
+      ),
     );
   }
-
 }
