@@ -123,16 +123,17 @@ class CustomCacheManager {
       }
     } catch (error) {
       print("last data");
-      try {
-        final FileInfo? fileInfo = await _cacheManager.getFileFromCache(cacheKey);
-        return [fileInfo!.file, false];
-      }
-      catch (error) {
-        throw const SocketException("no wifi");
+
+      // If stale cached data exists, keep the app's offline behavior.
+      final FileInfo? fileInfo = await _cacheManager.getFileFromCache(cacheKey);
+      if (fileInfo != null) {
+        return [fileInfo.file, false];
       }
 
-      //final cachedFile = await _cacheManager.getSingleFile(url);
-      //return cachedFile;
+      // Do not turn every HTTP/authentication/format failure into "no wifi".
+      // Re-throw the original exception so the UI can distinguish a real
+      // network failure from (for example) a WeatherAPI 401/403 response.
+      rethrow;
     }
   }
 }
