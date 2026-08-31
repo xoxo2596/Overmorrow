@@ -159,13 +159,31 @@ Future<List<dynamic>> MetNMakeRequest(double lat, double lng, String real_loc) a
 }
 
 WeatherCurrent metNWeatherCurrentFromJson(item) {
-  final dynamic it = item["properties"]["timeseries"][0]["data"];
-  final dynamic nextHours = it["next_1_hours"] ?? it["next_6_hours"];
+  final List<dynamic> timeseries = item["properties"]["timeseries"];
+  final dynamic it = timeseries[0]["data"];
+  dynamic nextHours = it["next_1_hours"] ?? it["next_6_hours"] ?? it["next_12_hours"];
+
+  // Tail entries in the forecast window sometimes carry no next_* summary at
+  // all (only "instant" data). Fall back to the nearest entry that has one
+  // instead of indexing into null.
+  if (nextHours == null) {
+    for (final entry in timeseries) {
+      final dynamic d = entry["data"];
+      final dynamic candidate = d["next_1_hours"] ?? d["next_6_hours"] ?? d["next_12_hours"];
+      if (candidate != null) {
+        nextHours = candidate;
+        break;
+      }
+    }
+  }
+
   final dynamic details = it["instant"]["details"];
 
   return WeatherCurrent(
-    condition: metNTextCorrection(nextHours["summary"]["symbol_code"]),
-    precipMm: (nextHours["details"]["precipitation_amount"] as num?)?.toDouble() ?? 0,
+    condition: nextHours != null
+        ? metNTextCorrection(nextHours["summary"]["symbol_code"])
+        : metNTextCorrection('clearsky_day'),
+    precipMm: (nextHours?["details"]?["precipitation_amount"] as num?)?.toDouble() ?? 0,
     tempC: (details["air_temperature"] as num).toDouble(),
     humidity: (details["relative_humidity"] as num?)?.round() ?? 0,
     windKmh: ((details["wind_speed"] as num?)?.toDouble() ?? 0) * 3.6,
@@ -246,12 +264,16 @@ WeatherHour metNWeatherHourFromJson(item, Duration utcOffset) {
       item["data"]["next_12_hours"];
   final dynamic details = item["data"]["instant"]["details"];
 
+  // Some hours near the end of the forecast window have no next_* summary
+  // at all — don't crash, just report a neutral condition for that hour.
   return WeatherHour(
     windGustKmh: null,
-    condition: metNTextCorrection(nextHours["summary"]["symbol_code"]),
+    condition: nextHours != null
+        ? metNTextCorrection(nextHours["summary"]["symbol_code"])
+        : metNTextCorrection('clearsky_day'),
     tempC: (details["air_temperature"] as num).toDouble(),
-    precipMm: (nextHours["details"]["precipitation_amount"] as num?)?.toDouble() ?? 0,
-    precipProb: (nextHours["details"]["probability_of_precipitation"] as num?)?.round(),
+    precipMm: (nextHours?["details"]?["precipitation_amount"] as num?)?.toDouble() ?? 0,
+    precipProb: (nextHours?["details"]?["probability_of_precipitation"] as num?)?.round(),
     time: metNUtcToLocationTime(item["time"], utcOffset),
     windKmh: ((details["wind_speed"] as num?)?.toDouble() ?? 0) * 3.6,
     windDirA: (details["wind_from_direction"] as num?)?.round(),
@@ -495,10 +517,12 @@ Future<LightCurrentWeatherData> metNGetLightCurrentData(placeName, lat, lon, Sha
   final MetNTimezoneInfo timezoneInfo = await MetNGetTimezoneInfo(lat, lon);
   final DateTime localNow = timezoneInfo.localTime;
   final dynamic first = item["properties"]["timeseries"][0]["data"];
-  final dynamic next = first["next_1_hours"] ?? first["next_6_hours"];
+  final dynamic next = first["next_1_hours"] ?? first["next_6_hours"] ?? first["next_12_hours"];
 
   return LightCurrentWeatherData(
-    condition: metNTextCorrection(next["summary"]["symbol_code"]),
+    condition: next != null
+        ? metNTextCorrection(next["summary"]["symbol_code"])
+        : metNTextCorrection('clearsky_day'),
     place: placeName,
     temp: unitConversion(
       first["instant"]["details"]["air_temperature"],
