@@ -817,7 +817,6 @@ Future<LightCurrentWeatherData> omGetLightCurrentData(
   final item = jsonDecode(response);
 
   DateTime localtime = oMGetLocalTime(item);
-  DateTime now = DateTime.now();
 
   WeatherSunStatus sunStatus = oMWeatherSunStatusFromJson(item);
 
@@ -828,8 +827,8 @@ Future<LightCurrentWeatherData> omGetLightCurrentData(
     temp: unitConversion(item["current"]["temperature_2m"],
             prefs.getString("Temperature") ?? "˚C")
         .round(),
-    updatedTime: "${now.hour}:${now.minute.toString().padLeft(2, "0")}",
-    dateString: getDateStringFromLocalTime(now),
+    updatedTime: "${localtime.hour}:${localtime.minute.toString().padLeft(2, "0")}",
+    dateString: getDateStringFromLocalTime(localtime),
   );
 }
 
@@ -914,7 +913,6 @@ Future<LightHourlyForecastData> omGetHourlyForecast(
   final item = jsonDecode(response);
 
   DateTime localtime = oMGetLocalTime(item);
-  DateTime now = DateTime.now();
 
   WeatherSunStatus sunStatus = oMWeatherSunStatusFromJson(item);
 
@@ -997,7 +995,7 @@ Future<LightHourlyForecastData> omGetHourlyForecast(
         item["current"]["weather_code"], sunStatus, localtime),
     currentTemp:
         unitConversion(item["current"]["temperature_2m"], tempUnit).round(),
-    updatedTime: "${now.hour}:${now.minute.toString().padLeft(2, "0")}",
+    updatedTime: "${localtime.hour}:${localtime.minute.toString().padLeft(2, "0")}",
     //i can't sync lists to widgets so i need to encode and then decode them
     hourly6Conditions: jsonEncode(hourly6Conditions),
     hourly6Names: jsonEncode(hourly6Names),
