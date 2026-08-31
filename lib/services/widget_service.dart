@@ -37,24 +37,28 @@ const uvWidgetReceiver = 'com.marotidev.overmorrow.receivers.UvWidgetReceiver';
 const forecastWidgetReceiver = 'com.marotidev.overmorrow.receivers.ForecastWidgetReceiver';
 const oneHourlyWidgetReceiver = 'com.marotidev.overmorrow.receivers.OneHourlyWidgetReceiver';
 
-void initializeWidgetServices() {
-  Workmanager().initialize(
-      myCallbackDispatcher, // The top level function, aka callbackDispatcher
-      isInDebugMode: kDebugMode // If enabled it will post a notification whenever the task is running. Handy for debugging tasks
+Future<void> initializeWidgetServices() async {
+  // Initialization uses a platform channel and returns a Future. Registering
+  // work before it completes can race the native WorkManager setup.
+  await Workmanager().initialize(
+    myCallbackDispatcher,
+    isInDebugMode: kDebugMode,
   );
 
-  HomeWidget.registerInteractivityCallback(interactiveCallback);
+  await HomeWidget.registerInteractivityCallback(interactiveCallback);
 
-  if (kDebugMode) {
-    print("thissssssssssssssssssssssssssssssssss");
-    Workmanager().registerOneOffTask("test_task_${DateTime.now().millisecondsSinceEpoch}", updateWeatherDataKey);
-  }
-
-  Workmanager().registerPeriodicTask(
+  // Do not enqueue an extra immediate test worker just because the installed
+  // APK is a debug build. GitHub Actions currently produces a debug APK, so
+  // that old block caused a second weather/notification refresh on every app
+  // launch in addition to the periodic worker.
+  await Workmanager().registerPeriodicTask(
     "updateWeatherWidget",
     updateWeatherDataKey,
     frequency: const Duration(minutes: 15),
-    constraints: Constraints(networkType: NetworkType.connected, requiresBatteryNotLow: true),
+    existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
+    constraints: Constraints(
+      networkType: NetworkType.connected,
+    ),
   );
 }
 
