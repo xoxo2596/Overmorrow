@@ -101,7 +101,7 @@ class WidgetService {
     await saveData("widget.place.$widgetId", data.place);
   }
 
-  static void logUpdateTime(SharedPreferences prefs) {
+  static Future<void> logUpdateTime(SharedPreferences prefs) async {
 
     List<String> timeLog = prefs.getStringList("backgroundUpdateLog") ?? [];
 
@@ -112,7 +112,7 @@ class WidgetService {
     }
 
     print(("timelog", timeLog));
-    prefs.setStringList("backgroundUpdateLog", timeLog);
+    await prefs.setStringList("backgroundUpdateLog", timeLog);
   }
 
   static Future<void> saveBackgroundTaskState(String state) async {
@@ -149,30 +149,32 @@ class WidgetService {
   }
 
   static Future<void> reloadWidgets() async {
-    HomeWidget.updateWidget(
-      androidName: 'CurrentWidget',
-      qualifiedAndroidName: currentWidgetReceiver,
-    );
-    HomeWidget.updateWidget(
-      androidName: 'DateCurrentWidget',
-      qualifiedAndroidName: dateCurrentWidgetReceiver,
-    );
-    HomeWidget.updateWidget(
-      androidName: 'WindWidget',
-      qualifiedAndroidName: windWidgetReceiver,
-    );
-    HomeWidget.updateWidget(
-      androidName: 'ForecastWidget',
-      qualifiedAndroidName: forecastWidgetReceiver,
-    );
-    HomeWidget.updateWidget(
-      androidName: 'OneHourlyWidget',
-      qualifiedAndroidName: oneHourlyWidgetReceiver,
-    );
-    HomeWidget.updateWidget(
-      androidName: 'UvWidget',
-      qualifiedAndroidName: uvWidgetReceiver,
-    );
+    await Future.wait([
+      HomeWidget.updateWidget(
+        androidName: 'CurrentWidget',
+        qualifiedAndroidName: currentWidgetReceiver,
+      ),
+      HomeWidget.updateWidget(
+        androidName: 'DateCurrentWidget',
+        qualifiedAndroidName: dateCurrentWidgetReceiver,
+      ),
+      HomeWidget.updateWidget(
+        androidName: 'WindWidget',
+        qualifiedAndroidName: windWidgetReceiver,
+      ),
+      HomeWidget.updateWidget(
+        androidName: 'ForecastWidget',
+        qualifiedAndroidName: forecastWidgetReceiver,
+      ),
+      HomeWidget.updateWidget(
+        androidName: 'OneHourlyWidget',
+        qualifiedAndroidName: oneHourlyWidgetReceiver,
+      ),
+      HomeWidget.updateWidget(
+        androidName: 'UvWidget',
+        qualifiedAndroidName: uvWidgetReceiver,
+      ),
+    ]);
   }
 }
 
@@ -203,7 +205,10 @@ void myCallbackDispatcher() {
           //--------------------NOTIFICATIONS--------------------
 
           if (prefs.getBool("Ongoing notification") ?? false) {
-            await NotificationService().updateOngoingNotification(prefs);
+            final NotificationService notificationService =
+                NotificationService();
+            await notificationService.initializePlugin();
+            await notificationService.updateOngoingNotification(prefs);
           }
 
           //--------------------WIDGETS--------------------------
@@ -212,12 +217,12 @@ void myCallbackDispatcher() {
 
           if (installedWidgets.isEmpty) {
             if (prefs.getBool("Ongoing notification") ?? false) {
-              WidgetService.saveBackgroundTaskState("WORKER RESULT SUCCESS AT ${DateTime.now()} \nONGOING NOTIFICATION");
-              WidgetService.logUpdateTime(prefs);
+              await WidgetService.saveBackgroundTaskState("WORKER RESULT SUCCESS AT ${DateTime.now()} \nONGOING NOTIFICATION");
+              await WidgetService.logUpdateTime(prefs);
             }
             else {
               print("no widgets installed, skipping update");
-              WidgetService.saveBackgroundTaskState("WORKER RESULT SUCCESS AT ${DateTime.now()} \nNO WIDGETS INSTALLED");
+              await WidgetService.saveBackgroundTaskState("WORKER RESULT SUCCESS AT ${DateTime.now()} \nNO WIDGETS INSTALLED");
             }
             return Future.value(true);
           }
@@ -278,7 +283,7 @@ void myCallbackDispatcher() {
 
           }
 
-          WidgetService.reloadWidgets();
+          await WidgetService.reloadWidgets();
 
         } catch (err, stacktrace) {
           if (kDebugMode) {
@@ -286,13 +291,13 @@ void myCallbackDispatcher() {
             print((err, stacktrace));
           }
           String e = sanitizeErrorMessage(err.toString());
-          WidgetService.saveBackgroundTaskState("WORKER RESULT FAILURE AT ${DateTime.now()} \n $e");
+          await WidgetService.saveBackgroundTaskState("WORKER RESULT FAILURE AT ${DateTime.now()} \n $e");
           return Future.value(false);
         }
     }
 
-    WidgetService.saveBackgroundTaskState("WORKER RESULT SUCCESS AT ${DateTime.now()}");
-    WidgetService.logUpdateTime(prefs);
+    await WidgetService.saveBackgroundTaskState("WORKER RESULT SUCCESS AT ${DateTime.now()}");
+    await WidgetService.logUpdateTime(prefs);
     return Future.value(true);
   });
 }
