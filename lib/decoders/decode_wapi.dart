@@ -45,7 +45,7 @@ Future<List<dynamic>> WapiMakeRequest(String latlong, String real_loc) async {
   };
   final url = Uri.https('api.weatherapi.com', 'v1/forecast.json', params);
 
-  var file = await XCustomCacheManager.fetchData(url.toString(), "$real_loc, weatherapi.com");
+  var file = await XCustomCacheManager.fetchData(url.toString(), "$latlong, weatherapi.com");
 
   DateTime fetch_datetime = await file[0].lastModified();
   bool isonline = file[1];
@@ -91,22 +91,6 @@ double getSunStatus(String sunrise, String sunset, DateTime localtime, {by = " "
   int all3 = (hour3 * 60 + minute3) - all1;
 
   return min(1, max(all3 / all2, 0));
-}
-
-Future<DateTime> WapiGetLocalTime(lat, lng) async {
-  final params = {
-    'key': timezonedbKey,
-    'lat': lat.toString(),
-    'lng': lng.toString(),
-    'format': 'json',
-    'by': 'position'
-  };
-  final url = Uri.https('api.timezonedb.com', 'v2.1/get-time-zone', params);
-  var file = await XCustomCacheManager.fetchData(url.toString(), "$lat, $lng timezonedb.com");
-  var response = await file[0].readAsString();
-  var body = jsonDecode(response);
-  
-  return DateTime.parse(body["formatted"]);
 }
 
 String wapiTextCorrection(name, isday) {
@@ -345,8 +329,9 @@ Future<WeatherData> WapiGetWeatherData(lat, lng, placeName) async {
   DateTime fetch_datetime = wapi[1];
   bool isonline = wapi[2];
 
-  //DateTime lastKnowTime = DateTime.parse(wapi_body["location"]["localtime"]);
-  DateTime lastKnowTime = await WapiGetLocalTime(lat, lng);
+  // WeatherAPI already returns the forecast location's local wall-clock time.
+  // Using it avoids a second, foreground-only TimeZoneDB dependency.
+  DateTime lastKnowTime = DateTime.parse(wapi_body["location"]["localtime"]);
 
   //this gives us the time passed since last fetch, this is all basically for offline mode
   Duration realTimeOffset = DateTime.now().difference(fetch_datetime);
@@ -433,15 +418,14 @@ Future<dynamic> wapiGetCurrentResponse(lat, lon) async {
 
 Future<LightCurrentWeatherData> wapiGetLightCurrentData(placeName, lat, lon, SharedPreferences prefs) async {
   final item = await wapiGetCurrentResponse(lat, lon);
-
-  DateTime now = DateTime.now();
+  final DateTime localNow = DateTime.parse(item["location"]["localtime"]);
 
   return LightCurrentWeatherData(
     condition: wapiTextCorrection(item["current"]["condition"]["code"], item["current"]["is_day"]),
     place: placeName,
-    temp:  unitConversion(item["current"]["temp_c"], prefs.getString("Temperature") ?? "˚C").round(),
-    updatedTime: "${now.hour}:${now.minute.toString().padLeft(2, "0")}",
-    dateString: getDateStringFromLocalTime(now),
+    temp: unitConversion(item["current"]["temp_c"], prefs.getString("Temperature") ?? "˚C").round(),
+    updatedTime: "${localNow.hour}:${localNow.minute.toString().padLeft(2, "0")}",
+    dateString: getDateStringFromLocalTime(localNow),
   );
 }
 
@@ -468,57 +452,100 @@ Future<LightHourlyForecastData> wapiGetLightHourlyData(placeName, lat, lon, Shar
     'key': wapi_Key,
     'q': "$lat, $lon",
     'aqi': 'no',
-    'days': '1',
+    'days': '2',
     'alerts': 'no',
   };
   final url = Uri.https('api.weatherapi.com', 'v1/forecast.json', params);
 
-  final response = (await http.get(url)).body;
+  final http.Response httpResponse = await http.get(url);
+  if (httpResponse.statusCode < 200 || httpResponse.statusCode >= 300) {
+    throw HttpException('WeatherAPI forecast request failed: ${httpResponse.statusCode}');
+  }
 
-  final item = jsonDecode(response);
+  final item = jsonDecode(httpResponse.body);
 
-  List<String> hourly6Conditions = [];
-  List<int> hourly6Temps = [];
-  List<String> hourly6Names = [];
-  List<String> hourly1Conditions = [];
-  List<int> hourly1Temps = [];
-  List<String> hourly1Names = [];
-
-  DateTime now = DateTime.now();
+  final List<String> hourly6Conditions = [];
+  final List<int> hourly6Temps = [];
+  final List<String> hourly6Names = [];
+  final List<String> hourly1Conditions = [];
+  final List<int> hourly1Temps = [];
+  final List<String> hourly1Names = [];
+  final List<int> hourly1PrecipProbability = [];
 
   final String tempUnit = prefs.getString("Temperature") ?? "˚C";
   final String timeMode = prefs.getString("Time mode") ?? "12 hour";
+  final String windUnit = prefs.getString("Wind") ?? "m/s";
 
-  for (int i = 0; i < item["forecast"]["forecastday"][0]["hour"].length; i++) {
-    final hour = item["forecast"]["forecastday"][0]["hour"][i];
+  final DateTime localNow = DateTime.parse(item["location"]["localtime"]);
+  final DateTime currentHour = DateTime(
+    localNow.year,
+    localNow.month,
+    localNow.day,
+    localNow.hour,
+  );
+  final DateTime forecastEnd = currentHour.add(const Duration(hours: 6));
+  final DateTime todayEnd = DateTime(
+    localNow.year,
+    localNow.month,
+    localNow.day,
+  ).add(const Duration(days: 1));
 
-    DateTime d = DateTime.fromMillisecondsSinceEpoch(hour["time_epoch"] * 1000, isUtc: true).toLocal();
+  int currentPrecipProbability = 0;
 
-    if (d.hour % 6 == 0) {
-      hourly6Conditions.add(wapiTextCorrection(hour["condition"]["code"], hour["is_day"]));
-      hourly6Temps.add(unitConversion(hour["temp_c"], tempUnit).round());
-      hourly6Names.add(formatHourByTimeMode(d, timeMode));
-    }
+  for (final forecastDay in item["forecast"]["forecastday"]) {
+    for (final hour in forecastDay["hour"]) {
+      // WeatherAPI's hour.time is already local to the requested location.
+      final DateTime d = DateTime.parse(hour["time"]);
 
-    if (d.difference(now).inHours >= 0 && d.difference(now).inHours < 3) {
-      hourly1Conditions.add(wapiTextCorrection(hour["condition"]["code"], hour["is_day"]));
-      hourly1Temps.add(unitConversion(hour["temp_c"], tempUnit).round());
-      hourly1Names.add(formatHourByTimeMode(d, timeMode));
+      if (d.hour % 6 == 0 && d.isBefore(todayEnd)) {
+        hourly6Conditions.add(
+          wapiTextCorrection(hour["condition"]["code"], hour["is_day"]),
+        );
+        hourly6Temps.add(unitConversion(hour["temp_c"], tempUnit).round());
+        hourly6Names.add(formatHourByTimeMode(d, timeMode));
+      }
+
+      if (!d.isBefore(currentHour) && d.isBefore(forecastEnd)) {
+        final int precip = (hour["chance_of_rain"] as num?)?.round() ?? 0;
+        if (hourly1Conditions.isEmpty) {
+          currentPrecipProbability = precip;
+        }
+
+        hourly1Conditions.add(
+          wapiTextCorrection(hour["condition"]["code"], hour["is_day"]),
+        );
+        hourly1Temps.add(unitConversion(hour["temp_c"], tempUnit).round());
+        hourly1Names.add(formatHourByTimeMode(d, timeMode));
+        hourly1PrecipProbability.add(precip);
+      }
     }
   }
 
+  final dynamic today = item["forecast"]["forecastday"][0]["day"];
+
   return LightHourlyForecastData(
     place: placeName,
-    currentCondition: wapiTextCorrection(item["current"]["condition"]["code"], item["current"]["is_day"]),
+    currentCondition: wapiTextCorrection(
+      item["current"]["condition"]["code"],
+      item["current"]["is_day"],
+    ),
     currentTemp: unitConversion(item["current"]["temp_c"], tempUnit).round(),
-    updatedTime: "${now.hour}:${now.minute.toString().padLeft(2, "0")}",
-    //i can't sync lists to widgets so i need to encode and then decode them
+    updatedTime: "${localNow.hour}:${localNow.minute.toString().padLeft(2, "0")}",
     hourly6Conditions: jsonEncode(hourly6Conditions),
     hourly6Names: jsonEncode(hourly6Names),
     hourly6Temps: jsonEncode(hourly6Temps),
-
     hourly1Conditions: jsonEncode(hourly1Conditions),
     hourly1Names: jsonEncode(hourly1Names),
     hourly1Temps: jsonEncode(hourly1Temps),
+    feelsLike: unitConversion(item["current"]["feelslike_c"], tempUnit).round(),
+    tempMax: unitConversion(today["maxtemp_c"], tempUnit).round(),
+    tempMin: unitConversion(today["mintemp_c"], tempUnit).round(),
+    humidity: (item["current"]["humidity"] as num).round(),
+    uvIndex: (item["current"]["uv"] as num?)?.round() ?? 0,
+    windSpeed: unitConversion(item["current"]["wind_kph"], windUnit).toDouble(),
+    windUnit: windUnit,
+    precipProbability: currentPrecipProbability,
+    hourly1PrecipProbability: jsonEncode(hourly1PrecipProbability),
   );
 }
+
