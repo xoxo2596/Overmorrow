@@ -84,137 +84,170 @@ class NotificationImageService {
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final Canvas canvas =
         Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
+    final List<ui.Image> sourceImages = [];
 
-    // ---- header row: icon, "{temp}° - {place}", "Feels like {x}°",
-    //      and high/low | precip on the right
-    final ui.Image headerIcon = await _loadSvgAsImage(
-      weatherIconPathMap[data.currentCondition] ??
-          "assets/weather_icons/clear_sky.svg",
-      (30 * scale).round(),
-    );
-    canvas.drawImage(headerIcon, Offset(0, 2 * scale), Paint());
-
-    _drawText(
-      canvas,
-      "${data.currentTemp}° - ${data.place}",
-      Offset(40 * scale, 0),
-      textColor,
-      15 * scale,
-      FontWeight.w600,
-    );
-
-    _drawText(
-      canvas,
-      "Feels like: ${data.feelsLike}°",
-      Offset(40 * scale, 20 * scale),
-      subTextColor,
-      11.5 * scale,
-      FontWeight.normal,
-    );
-
-    final String highLow =
-        "${data.tempMax}°/${data.tempMin}° | ${data.precipProbability}%";
-    final double highLowWidth = _measureText(highLow, 11.5 * scale, FontWeight.normal);
-    _drawText(
-      canvas,
-      highLow,
-      Offset(width - highLowWidth, 20 * scale),
-      subTextColor,
-      11.5 * scale,
-      FontWeight.normal,
-    );
-
-    // ---- stats row: wind / humidity / uv
-    final double statsY = 42 * scale;
-    _drawStat(canvas, Icons.air, "${data.windSpeed.round()} ${data.windUnit}",
-        Offset(0, statsY), textColor, scale);
-    _drawStat(canvas, Icons.water_drop_outlined, "${data.humidity}%",
-        Offset(115 * scale, statsY), textColor, scale);
-    _drawStat(canvas, Icons.wb_sunny_outlined, "${data.uvIndex}",
-        Offset(210 * scale, statsY), textColor, scale);
-
-    // ---- divider
-    final Paint dividerPaint = Paint()
-      ..color = dividerColor
-      ..strokeWidth = 1 * scale;
-    canvas.drawLine(
-        Offset(0, 66 * scale), Offset(width, 66 * scale), dividerPaint);
-
-    // ---- hourly strip
-    final List<String> hourNames =
-        List<String>.from(jsonDecode(data.hourly1Names));
-    final List<int> hourTemps =
-        List<int>.from(jsonDecode(data.hourly1Temps));
-    final List<String> hourConditions =
-        List<String>.from(jsonDecode(data.hourly1Conditions));
-
-    List<int> hourPrecip = [];
     try {
-      hourPrecip = List<int>.from(jsonDecode(data.hourly1PrecipProbability));
-    } catch (_) {
-      // older cached data without this field yet - just skip the row
-    }
+      // ---- header row: icon, "{temp}° - {place}", "Feels like {x}°",
+      //      and high/low | precip on the right
+      final ui.Image headerIcon = await _loadSvgAsImage(
+        weatherIconPathMap[data.currentCondition] ??
+            "assets/weather_icons/clear_sky.svg",
+        (30 * scale).round(),
+      );
+      sourceImages.add(headerIcon);
+      canvas.drawImage(headerIcon, Offset(0, 2 * scale), Paint());
 
-    final int count = [hourNames.length, hourTemps.length, hourConditions.length]
-        .reduce((a, b) => a < b ? a : b)
-        .clamp(0, 6);
+      _drawText(
+        canvas,
+        "${data.currentTemp}° - ${data.place}",
+        Offset(40 * scale, 0),
+        textColor,
+        15 * scale,
+        FontWeight.w600,
+      );
 
-    if (count > 0) {
-      final double colWidth = width / count;
+      _drawText(
+        canvas,
+        "Feels like: ${data.feelsLike}°",
+        Offset(40 * scale, 20 * scale),
+        subTextColor,
+        11.5 * scale,
+        FontWeight.normal,
+      );
 
-      for (int i = 0; i < count; i++) {
-        final double colCenter = colWidth * i + colWidth / 2;
+      final String highLow =
+          "${data.tempMax}°/${data.tempMin}° | ${data.precipProbability}%";
+      final double highLowWidth =
+          _measureText(highLow, 11.5 * scale, FontWeight.normal);
+      _drawText(
+        canvas,
+        highLow,
+        Offset(width - highLowWidth, 20 * scale),
+        subTextColor,
+        11.5 * scale,
+        FontWeight.normal,
+      );
 
-        _drawCenteredText(canvas, hourNames[i], Offset(colCenter, 76 * scale),
-            subTextColor, 10.5 * scale, FontWeight.normal);
+      // ---- stats row: wind / humidity / uv
+      final double statsY = 42 * scale;
+      _drawStat(canvas, Icons.air, "${data.windSpeed.round()} ${data.windUnit}",
+          Offset(0, statsY), textColor, scale);
+      _drawStat(canvas, Icons.water_drop_outlined, "${data.humidity}%",
+          Offset(115 * scale, statsY), textColor, scale);
+      _drawStat(canvas, Icons.wb_sunny_outlined, "${data.uvIndex}",
+          Offset(210 * scale, statsY), textColor, scale);
 
-        if (i < hourPrecip.length) {
-          _drawCenteredText(canvas, "${hourPrecip[i]}%",
-              Offset(colCenter, 90 * scale), subTextColor, 9.5 * scale, FontWeight.normal);
+      // ---- divider
+      final Paint dividerPaint = Paint()
+        ..color = dividerColor
+        ..strokeWidth = 1 * scale;
+      canvas.drawLine(
+          Offset(0, 66 * scale), Offset(width, 66 * scale), dividerPaint);
+
+      // ---- hourly strip
+      final List<String> hourNames =
+          List<String>.from(jsonDecode(data.hourly1Names));
+      final List<int> hourTemps =
+          List<int>.from(jsonDecode(data.hourly1Temps));
+      final List<String> hourConditions =
+          List<String>.from(jsonDecode(data.hourly1Conditions));
+
+      List<int> hourPrecip = [];
+      try {
+        hourPrecip =
+            List<int>.from(jsonDecode(data.hourly1PrecipProbability));
+      } catch (_) {
+        // older cached data without this field yet - just skip the row
+      }
+
+      final int count =
+          [hourNames.length, hourTemps.length, hourConditions.length]
+              .reduce((a, b) => a < b ? a : b)
+              .clamp(0, 6);
+
+      if (count > 0) {
+        final double colWidth = width / count;
+
+        for (int i = 0; i < count; i++) {
+          final double colCenter = colWidth * i + colWidth / 2;
+
+          _drawCenteredText(canvas, hourNames[i], Offset(colCenter, 76 * scale),
+              subTextColor, 10.5 * scale, FontWeight.normal);
+
+          if (i < hourPrecip.length) {
+            _drawCenteredText(
+                canvas,
+                "${hourPrecip[i]}%",
+                Offset(colCenter, 90 * scale),
+                subTextColor,
+                9.5 * scale,
+                FontWeight.normal);
+          }
+
+          final ui.Image hourIcon = await _loadSvgAsImage(
+            weatherIconPathMap[hourConditions[i]] ??
+                "assets/weather_icons/clear_sky.svg",
+            (24 * scale).round(),
+          );
+          sourceImages.add(hourIcon);
+          canvas.drawImage(
+              hourIcon, Offset(colCenter - (12 * scale), 106 * scale), Paint());
+
+          _drawCenteredText(canvas, "${hourTemps[i]}°",
+              Offset(colCenter, 134 * scale), textColor, 12 * scale, FontWeight.w600);
+        }
+      }
+
+      final ui.Picture picture = recorder.endRecording();
+      ui.Image? finalImage;
+      try {
+        finalImage = await picture.toImage(width.round(), height.round());
+        final ByteData? pngBytes =
+            await finalImage.toByteData(format: ui.ImageByteFormat.png);
+        if (pngBytes == null) {
+          throw StateError('Could not encode ongoing notification image');
         }
 
-        final ui.Image hourIcon = await _loadSvgAsImage(
-          weatherIconPathMap[hourConditions[i]] ??
-              "assets/weather_icons/clear_sky.svg",
-          (24 * scale).round(),
-        );
-        canvas.drawImage(
-            hourIcon, Offset(colCenter - (12 * scale), 106 * scale), Paint());
-
-        _drawCenteredText(canvas, "${hourTemps[i]}°",
-            Offset(colCenter, 134 * scale), textColor, 12 * scale, FontWeight.w600);
+        final Directory dir = await getTemporaryDirectory();
+        final File file = File('${dir.path}/ongoing_notification.png');
+        await file.writeAsBytes(pngBytes.buffer.asUint8List(), flush: true);
+        return file.path;
+      } finally {
+        finalImage?.dispose();
+        picture.dispose();
+      }
+    } finally {
+      // The worker can tear down its Flutter engine immediately after this
+      // Future completes. Release every raster image explicitly before that
+      // happens instead of leaving GPU/native resources to finalizers.
+      for (final ui.Image image in sourceImages) {
+        image.dispose();
       }
     }
-
-    final ui.Picture picture = recorder.endRecording();
-    final ui.Image finalImage =
-        await picture.toImage(width.round(), height.round());
-    final ByteData? pngBytes =
-        await finalImage.toByteData(format: ui.ImageByteFormat.png);
-
-    final Directory dir = await getTemporaryDirectory();
-    final File file = File('${dir.path}/ongoing_notification.png');
-    await file.writeAsBytes(pngBytes!.buffer.asUint8List(), flush: true);
-
-    return file.path;
   }
 
   static Future<ui.Image> _loadSvgAsImage(String assetPath, int size) async {
     final loader = SvgAssetLoader(assetPath);
     final PictureInfo pictureInfo = await vg.loadPicture(loader, null);
+    ui.Picture? scaledPicture;
 
-    final ui.PictureRecorder recorder = ui.PictureRecorder();
-    final Canvas canvas = Canvas(recorder);
+    try {
+      final ui.PictureRecorder recorder = ui.PictureRecorder();
+      final Canvas canvas = Canvas(recorder);
 
-    final double sourceSize =
-        pictureInfo.size.width == 0 ? 1 : pictureInfo.size.width;
-    final double scaleFactor = size / sourceSize;
+      final double sourceSize =
+          pictureInfo.size.width == 0 ? 1 : pictureInfo.size.width;
+      final double scaleFactor = size / sourceSize;
 
-    canvas.scale(scaleFactor);
-    canvas.drawPicture(pictureInfo.picture);
+      canvas.scale(scaleFactor);
+      canvas.drawPicture(pictureInfo.picture);
 
-    final ui.Picture scaledPicture = recorder.endRecording();
-    return scaledPicture.toImage(size, size);
+      scaledPicture = recorder.endRecording();
+      return await scaledPicture.toImage(size, size);
+    } finally {
+      scaledPicture?.dispose();
+      pictureInfo.picture.dispose();
+    }
   }
 
   static void _drawText(Canvas canvas, String text, Offset offset,
