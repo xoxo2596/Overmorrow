@@ -407,25 +407,25 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void setOngoingNotificationPlaceAndLatLon(String place, String latLon) {
+  Future<void> setOngoingNotificationPlaceAndLatLon(String place, String latLon) async {
     PreferenceUtils.setString("Ongoing place", place);
     PreferenceUtils.setString("Ongoing latLon", latLon);
     _ongoingNotificationPlace = place;
     _ongoingNotificationLatLon = latLon;
 
     if (_ongoingNotificationOn) {
-      NotificationService().updateOngoingNotification(PreferenceUtils.instance);
+      await NotificationService().updateOngoingNotification(PreferenceUtils.instance);
     }
 
     notifyListeners();
   }
 
-  void setOngoingNotificationProvider(String to) {
+  Future<void> setOngoingNotificationProvider(String to) async {
     PreferenceUtils.setString("Ongoing provider", to);
     _ongoingNotificationProvider = to;
 
     if (_ongoingNotificationOn) {
-      NotificationService().updateOngoingNotification(PreferenceUtils.instance);
+      await NotificationService().updateOngoingNotification(PreferenceUtils.instance);
     }
 
     notifyListeners();
