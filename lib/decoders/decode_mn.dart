@@ -322,7 +322,16 @@ WeatherRain15Minutes metNWeatherRain15MinutesFromJson(item) {
   List<double> hourly = [];
 
   for (int i = 0; i < 6; i++) {
-    double x = double.parse(item["properties"]["timeseries"][i]["data"]["next_1_hours"]["details"]["precipitation_amount"].toStringAsFixed(1));
+    final dynamic data = item["properties"]["timeseries"][i]["data"];
+    final dynamic nextHours =
+        data["next_1_hours"] ??
+        data["next_6_hours"] ??
+        data["next_12_hours"];
+
+    final double x =
+        (nextHours?["details"]?["precipitation_amount"] as num?)
+                ?.toDouble() ??
+            0.0;
 
     if (x > 0.0) {
       if (closest == 100) {
@@ -644,7 +653,9 @@ Future<LightHourlyForecastData> metNGetLightHourlyData(placeName, lat, lon, Shar
 
   return LightHourlyForecastData(
     place: placeName,
-    currentCondition: metNTextCorrection(firstNext["summary"]["symbol_code"]),
+    currentCondition: firstNext != null
+        ? metNTextCorrection(firstNext["summary"]["symbol_code"])
+        : metNTextCorrection('clearsky_day'),
     currentTemp: unitConversion(currentTempC, tempUnit).round(),
     updatedTime: "${localNow.hour}:${localNow.minute.toString().padLeft(2, "0")}",
     hourly6Conditions: jsonEncode(hourly6Conditions),
